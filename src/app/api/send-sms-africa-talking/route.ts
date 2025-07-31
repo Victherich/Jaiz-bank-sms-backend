@@ -415,7 +415,6 @@
 
 
 // 4th code
-
 import { NextRequest, NextResponse } from 'next/server';
 import AfricasTalking from 'africastalking';
 
@@ -425,107 +424,106 @@ const AT_API_KEY = process.env.AFRICAS_TALKING_API_KEY;
 const AT_SENDER_ID = process.env.AFRICAS_TALKING_SENDER_ID;
 
 let africastalking: ReturnType<typeof AfricasTalking>;
-let sms: ReturnType<typeof AfricasTalking['SMS']>;
+let sms: ReturnType<typeof AfricasTalking>['SMS'];
 
 if (AT_API_KEY && AT_USERNAME) {
-    africastalking = AfricasTalking({
-        apiKey: AT_API_KEY,
-        username: AT_USERNAME,
-    });
-    sms = africastalking.SMS;
+  africastalking = AfricasTalking({
+    apiKey: AT_API_KEY,
+    username: AT_USERNAME,
+  });
+  sms = africastalking.SMS;
 } else {
-    console.error("Africa's Talking API credentials are not set.");
+  console.error("Africa's Talking API credentials are not set.");
 }
 
 const corsHeaders = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Max-Age': '86400',
 };
 
 export async function OPTIONS() {
-    return new NextResponse(null, {
-        status: 204,
-        headers: corsHeaders,
-    });
+  return new NextResponse(null, {
+    status: 204,
+    headers: corsHeaders,
+  });
 }
 
 export async function POST(req: NextRequest) {
-    const responseHeaders = new Headers(corsHeaders);
+  const responseHeaders = new Headers(corsHeaders);
 
-    try {
-        if (!sms) {
-            return NextResponse.json(
-                { success: false, error: "Africa's Talking API is not initialized." },
-                { status: 500, headers: responseHeaders }
-            );
-        }
-
-        const body = await req.json();
-        const { bank, amount, account_number, phone_number, created_at } = body;
-
-        if (!bank || !amount || !account_number || !phone_number || !created_at) {
-            return NextResponse.json(
-                { success: false, error: 'Missing required transaction fields.' },
-                { status: 400, headers: responseHeaders }
-            );
-        }
-
-        const formattedPhoneNumber = phone_number.startsWith('+')
-            ? phone_number
-            : `+${phone_number}`;
-
-        const timeStamp = new Date(created_at).toLocaleString('en-NG', {
-            hour12: false,
-        });
-
-        const cleanMessage = `Dear Customer, your ${bank} account ending xxxx${account_number.slice(-4)} has been credited with NGN${amount} on ${timeStamp}. Thank you.`;
-
-        const smsOptions = {
-            to: formattedPhoneNumber,
-            message: cleanMessage,
-            from: AT_SENDER_ID || undefined,
-            enqueue: true,
-        };
-
-        console.log('Attempting to send SMS:', smsOptions);
-
-        const atResponse = await sms.send(smsOptions);
-
-        console.log('Africa\'s Talking Response:', JSON.stringify(atResponse, null, 2));
-
-        if (atResponse?.SMSMessageData?.Recipients?.[0]?.status === 'Success') {
-            return NextResponse.json(
-                { success: true, message: 'SMS sent successfully.', atResponse },
-                { status: 200, headers: responseHeaders }
-            );
-        } else {
-            const firstRecipient = atResponse?.SMSMessageData?.Recipients?.[0];
-            return NextResponse.json(
-                {
-                    success: false,
-                    error: firstRecipient?.status || 'Africa\'s Talking did not return success.',
-                    details: atResponse,
-                },
-                { status: 500, headers: responseHeaders }
-            );
-        }
-    } catch (error: unknown) {
-        console.error('[Africa\'s Talking SMS Error]', error);
-
-        let errorMessage = 'Unknown error occurred.';
-        if (error instanceof Error) {
-            errorMessage = error.message;
-        }
-
-        return NextResponse.json(
-            {
-                success: false,
-                error: 'Internal server error while sending SMS.',
-                details: errorMessage,
-            },
-            { status: 500, headers: responseHeaders }
-        );
+  try {
+    if (!sms) {
+      return NextResponse.json(
+        { success: false, error: "Africa's Talking API is not initialized." },
+        { status: 500, headers: responseHeaders }
+      );
     }
+
+    const body = await req.json();
+    const { bank, amount, account_number, phone_number, created_at } = body;
+
+    if (!bank || !amount || !account_number || !phone_number || !created_at) {
+      return NextResponse.json(
+        { success: false, error: 'Missing required transaction fields.' },
+        { status: 400, headers: responseHeaders }
+      );
+    }
+
+    const formattedPhoneNumber = phone_number.startsWith('+')
+      ? phone_number
+      : `+${phone_number}`;
+
+    const timeStamp = new Date(created_at).toLocaleString('en-NG', {
+      hour12: false,
+    });
+
+    const cleanMessage = `Dear Customer, your ${bank} account ending xxxx${account_number.slice(
+      -4
+    )} has been credited with NGN${amount} on ${timeStamp}. Thank you.`;
+
+    const smsOptions = {
+      to: formattedPhoneNumber,
+      message: cleanMessage,
+      from: AT_SENDER_ID || undefined,
+      enqueue: true,
+    };
+
+    console.log('Attempting to send SMS:', smsOptions);
+
+    const atResponse = await sms.send(smsOptions);
+
+    console.log("Africa's Talking Response:", JSON.stringify(atResponse, null, 2));
+
+    const recipient = atResponse?.SMSMessageData?.Recipients?.[0];
+    const wasSuccessful = recipient?.status === 'Success';
+
+    return NextResponse.json(
+      wasSuccessful
+        ? { success: true, message: 'SMS sent successfully.', atResponse }
+        : {
+            success: false,
+            error: recipient?.status || 'SMS failed to send.',
+            details: atResponse,
+          },
+      {
+        status: wasSuccessful ? 200 : 500,
+        headers: responseHeaders,
+      }
+    );
+  } catch (error: unknown) {
+    console.error('[Africa\'s Talking SMS Error]', error);
+
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Internal server error while sending SMS.',
+        details: errorMessage,
+      },
+      { status: 500, headers: responseHeaders }
+    );
+  }
 }
